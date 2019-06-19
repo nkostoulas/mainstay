@@ -10,6 +10,7 @@ import (
 	"flag"
 	"log"
 	"os"
+	"strings"
 
 	"mainstay/clients"
 	"mainstay/config"
@@ -20,13 +21,15 @@ import (
 
 // Use staychain package to read attestations, verify and print information
 
-const CLIENT_CHAIN_NAME = "clientchain"
-const CONF_PATH = "/src/mainstay/cmd/confirmationtool/conf.json"
-const API_HOST = "http://localhost:8080" // to replace with actual mainstay url
+const ClientChainName = "clientchain"
+const ConfPath = "/src/mainstay/cmd/confirmationtool/conf.json"
+const DefaultApiHost = "http://localhost:80" // to replace with actual mainstay url
 
 var (
 	tx          string
 	script      string
+	chaincodes  string
+	apiHost     string
 	position    int
 	showDetails bool
 	mainConfig  *config.Config
@@ -38,15 +41,17 @@ func init() {
 	flag.BoolVar(&showDetails, "detailed", false, "Detailed information on attestation transaction")
 	flag.StringVar(&tx, "tx", "", "Tx id from which to start searching the staychain")
 	flag.StringVar(&script, "script", "", "Redeem script of multisig used by attestaton service")
+	flag.StringVar(&chaincodes, "chaincodes", "", "Chaincodes for multisig pubkeys")
+	flag.StringVar(&apiHost, "apiHost", DefaultApiHost, "Host address for mainstay API")
 	flag.IntVar(&position, "position", -1, "Client merkle commitment position")
 	flag.Parse()
 
-	if tx == "" || script == "" || position == -1 {
+	if tx == "" || script == "" || position == -1 || chaincodes == "" {
 		flag.PrintDefaults()
-		log.Fatalf("Need to provide all -tx, -script and -position argument.")
+		log.Fatalf("Need to provide all -tx, -script, -chaincodes and -position argument.")
 	}
 
-	confFile, confErr := config.GetConfFile(os.Getenv("GOPATH") + CONF_PATH)
+	confFile, confErr := config.GetConfFile(os.Getenv("GOPATH") + ConfPath)
 	if confErr != nil {
 		log.Fatal(confErr)
 	}
@@ -55,7 +60,7 @@ func init() {
 	if mainConfigErr != nil {
 		log.Fatal(mainConfigErr)
 	}
-	client = config.NewClientFromConfig(CLIENT_CHAIN_NAME, false, confFile)
+	client = config.NewClientFromConfig(ClientChainName, false, confFile)
 }
 
 // main method
@@ -66,7 +71,8 @@ func main() {
 	txraw := getRawTxFromHash(tx)
 	fetcher := staychain.NewChainFetcher(mainConfig.MainClient(), txraw)
 	chain := staychain.NewChain(fetcher)
-	verifier := staychain.NewChainVerifier(mainConfig.MainChainCfg(), client, position, script, API_HOST)
+	verifier := staychain.NewChainVerifier(mainConfig.MainChainCfg(),
+		client, position, script, strings.Split(chaincodes, ","), apiHost)
 
 	// await new attestations and verify
 	for transaction := range chain.Updates() {
@@ -102,7 +108,7 @@ func printAttestation(tx staychain.Tx, info staychain.ChainVerifierInfo) {
 	if showDetails {
 		log.Printf("%+v\n", tx)
 	} else {
-		log.Printf("BITCOIN blockhash: %s\n", tx.BlockHash)
+		log.Printf("Bitcoin blockhash: %s\n", tx.BlockHash)
 	}
 	if info != (staychain.ChainVerifierInfo{}) {
 		log.Printf("CLIENT blockhash: %s\n", info.Hash().String())

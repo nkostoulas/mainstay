@@ -18,6 +18,8 @@ import (
 
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	_ "github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcutil"
 )
 
 // Attestation Service is the main processes that handles generating
@@ -28,42 +30,42 @@ type AttestationState int
 
 // Attestation states
 const (
-	ASTATE_ERROR              AttestationState = -1
-	ASTATE_INIT               AttestationState = 0
-	ASTATE_NEXT_COMMITMENT    AttestationState = 1
-	ASTATE_NEW_ATTESTATION    AttestationState = 2
-	ASTATE_SIGN_ATTESTATION   AttestationState = 3
-	ASTATE_PRE_SEND_STORE     AttestationState = 4
-	ASTATE_SEND_ATTESTATION   AttestationState = 5
-	ASTATE_AWAIT_CONFIRMATION AttestationState = 6
-	ASTATE_HANDLE_UNCONFIRMED AttestationState = 7
+	AStateError             AttestationState = -1
+	AStateInit              AttestationState = 0
+	AStateNextCommitment    AttestationState = 1
+	AStateNewAttestation    AttestationState = 2
+	AStateSignAttestation   AttestationState = 3
+	AStatePreSendStore      AttestationState = 4
+	AStateSendAttestation   AttestationState = 5
+	AStateAwaitConfirmation AttestationState = 6
+	AStateHandleUnconfirmed AttestationState = 7
 )
 
 // error / warning consts
 const (
-	ERROR_UNSPENT_NOT_FOUND = "No valid unspent found"
+	ErroUnspentNotFound = "No valid unspent found"
 
-	WARNING_INVALID_ATIME_NEW_ATTESTATION_ARG    = "Warning - Invalid new attestation time config value"
-	WARNING_INVALID_ATIME_HANDLE_UNCONFIRMED_ARG = "Warning - Invalid handle unconfirmed time config value"
+	WarningInvalidATimeNewAttestationArg    = "Warning - Invalid new attestation time config value"
+	WarningInvalidATimeHandleUnconfirmedArg = "Warning - Invalid handle unconfirmed time config value"
 )
 
 // waiting time schedules
 const (
 	// fixed waiting time between states
-	ATIME_FIXED = 5 * time.Second
+	ATimeFixed = 5 * time.Second
 
 	// waiting time for sigs to arrive from multisig nodes
-	ATIME_SIGS = 1 * time.Minute
+	ATimeSigs = 1 * time.Minute
 
 	// waiting time between attemps to check if an attestation has been confirmed
-	ATIME_CONFIRMATION = 15 * time.Minute
+	ATimeConfirmation = 15 * time.Minute
 
 	// waiting time between consecutive attestations after one was confirmed
-	DEFAULT_ATIME_NEW_ATTESTATION = 60 * time.Minute
+	DefaultATimeNewAttestation = 60 * time.Minute
 
 	// waiting time until we handle an attestation that has not been confirmed
 	// usually by increasing the fee of the previous transcation to speed up confirmation
-	DEFAULT_ATIME_HANDLE_UNCONFIRMED = 60 * time.Minute
+	DefaultATimeHandleUnconfirmed = 60 * time.Minute
 )
 
 // AttestationService structure
@@ -96,8 +98,8 @@ type AttestService struct {
 }
 
 var (
-	atimeNewAttestation    time.Duration // delay between attestations - DEFAULTS to DEFAULT_ATIME_NEW_ATTESTATION
-	atimeHandleUnconfirmed time.Duration // delay until handling unconfirmed - DEFAULTS to DEFAULT_ATIME_HANDLE_UNCONFIRMED
+	atimeNewAttestation    time.Duration // delay between attestations - DEFAULTS to DefaultATimeNewAttestation
+	atimeHandleUnconfirmed time.Duration // delay until handling unconfirmed - DEFAULTS to DefaultATimeHandleUnconfirmed
 
 	attestDelay time.Duration // handle state delay
 	confirmTime time.Time     // handle confirmation timing
@@ -116,29 +118,29 @@ func NewAttestService(ctx context.Context, wg *sync.WaitGroup, server *server.Se
 	attester := NewAttestClient(config)
 
 	// initiate timing schedules
-	atimeNewAttestation = DEFAULT_ATIME_NEW_ATTESTATION
+	atimeNewAttestation = DefaultATimeNewAttestation
 	if config.TimingConfig().NewAttestationMinutes > 0 {
 		atimeNewAttestation = time.Duration(config.TimingConfig().NewAttestationMinutes) * time.Minute
 	} else {
-		log.Printf("%s (%v)\n", WARNING_INVALID_ATIME_NEW_ATTESTATION_ARG, config.TimingConfig().NewAttestationMinutes)
+		log.Printf("%s (%v)\n", WarningInvalidATimeNewAttestationArg, config.TimingConfig().NewAttestationMinutes)
 	}
 	log.Printf("Time new attestation set to: %v\n", atimeNewAttestation)
-	atimeHandleUnconfirmed = DEFAULT_ATIME_HANDLE_UNCONFIRMED
+	atimeHandleUnconfirmed = DefaultATimeHandleUnconfirmed
 	if config.TimingConfig().HandleUnconfirmedMinutes > 0 {
 		atimeHandleUnconfirmed = time.Duration(config.TimingConfig().HandleUnconfirmedMinutes) * time.Minute
 	} else {
-		log.Printf("%s (%v)\n", WARNING_INVALID_ATIME_HANDLE_UNCONFIRMED_ARG, config.TimingConfig().HandleUnconfirmedMinutes)
+		log.Printf("%s (%v)\n", WarningInvalidATimeHandleUnconfirmedArg, config.TimingConfig().HandleUnconfirmedMinutes)
 	}
 	log.Printf("Time handle unconfirmed set to: %v\n", atimeHandleUnconfirmed)
 
-	return &AttestService{ctx, wg, config, attester, server, signer, ASTATE_INIT, models.NewAttestationDefault(), nil, config.Regtest()}
+	return &AttestService{ctx, wg, config, attester, server, signer, AStateInit, models.NewAttestationDefault(), nil, config.Regtest()}
 }
 
 // Run Attest Service
 func (s *AttestService) Run() {
 	defer s.wg.Done()
 
-	attestDelay = 30 * time.Second // add some delay for subscribers to have time to set up
+	attestDelay = 10 * time.Second // add some delay for subscribers to have time to set up
 
 	for { //Doing attestations using attestation client and waiting for transaction confirmation
 		timer := time.NewTimer(attestDelay)
@@ -160,17 +162,17 @@ func (s *AttestService) Run() {
 	}
 }
 
-// ASTATE_ERROR
+// AStateError
 // - Print error state and re-initiate attestation
 func (s *AttestService) doStateError() {
 	log.Println("*AttestService* ATTESTATION SERVICE FAILURE")
 	log.Println(s.errorState)
-	s.state = ASTATE_INIT
+	s.state = AStateInit // update attestation state
 }
 
-// part of ASTATE_INIT
+// part of AStateInit
 // handle case when an unconfirmed transactions is found in the mempool
-// fetch attestation information and set service state to ASTATE_AWAIT_CONFIRMATION
+// fetch attestation information and set service state to AStateAwaitConfirmation
 func (s *AttestService) stateInitUnconfirmed(unconfirmedTxid chainhash.Hash) {
 	commitment, commitmentErr := s.server.GetAttestationCommitment(unconfirmedTxid, false)
 	if s.setFailure(commitmentErr) {
@@ -181,11 +183,11 @@ func (s *AttestService) stateInitUnconfirmed(unconfirmedTxid chainhash.Hash) {
 	rawTx, _ := s.config.MainClient().GetRawTransaction(&unconfirmedTxid)
 	s.attestation.Tx = *rawTx.MsgTx() // set msgTx
 
-	s.state = ASTATE_AWAIT_CONFIRMATION // update attestation state
+	s.state = AStateAwaitConfirmation // update attestation state
 	confirmTime = time.Now()
 }
 
-// part of ASTATE_INIT
+// part of AStateInit
 // handle case when an unspent transaction is found in the wallet
 // if the unspent is a previous attestation, update database info
 // initiate a new attestation and inform signers of commitment
@@ -208,6 +210,8 @@ func (s *AttestService) stateInitUnspent(unspent btcjson.ListUnspentResult) {
 		if s.setFailure(errUpdate) {
 			return // will rebound to init
 		}
+
+		s.attester.Fees.ResetFee(s.isRegtest) // reset client fees
 	} else {
 		log.Println("********** found unspent transaction, initiating staychain")
 		s.attestation = models.NewAttestationDefault()
@@ -215,39 +219,55 @@ func (s *AttestService) stateInitUnspent(unspent btcjson.ListUnspentResult) {
 	confirmedHash := s.attestation.CommitmentHash()
 	s.signer.SendConfirmedHash((&confirmedHash).CloneBytes()) // update clients
 
-	s.state = ASTATE_NEXT_COMMITMENT // update attestation state
+	s.state = AStateNextCommitment // update attestation state
 }
 
-// part of ASTATE_INIT
+// part of AStateInit
 // handles wallet failure when neither unconfirmed or unspent is found
-// above case should never actually happen - untested grey area
-// TODO: sort this state, as implementation below is incorrect
+// above case should happen very rarely but when it does, import
+// both latest unconfirmed and confirmed attestation addresses to wallet
 func (s *AttestService) stateInitWalletFailure() {
 
 	log.Println("********** wallet failure")
-	s.state = ASTATE_INIT
 
-	// // no unspent so there must be a transaction waiting confirmation not on the mempool
-	// // check server for latest unconfirmed attestation
-	// lastCommitmentHash, latestErr := s.server.GetLatestAttestationCommitmentHash(false)
-	// if s.setFailure(latestErr) {
-	//     return // will rebound to init
-	// }
-	// commitment, commitmentErr := s.server.GetAttestationCommitment(lastCommitmentHash, false)
-	// if s.setFailure(commitmentErr) {
-	//     return // will rebound to init
-	// }
-	// log.Printf("********** found unconfirmed attestation: %s\n", lastCommitmentHash.String())
-	// s.attestation = models.NewAttestation(lastCommitmentHash, &commitment) // initialise attestation
-	// rawTx, _ := s.config.MainClient().GetRawTransaction(&unconfirmedTxid)
-	// s.attestation.Tx = *rawTx.MsgTx() // set msgTx
+	// get last confirmed commitment from server
+	lastCommitmentHash, latestErr := s.server.GetLatestAttestationCommitmentHash()
+	if s.setFailure(latestErr) {
+		return // will rebound to init
+	}
 
-	// s.state = ASTATE_AWAIT_CONFIRMATION // update attestation state
-	// confirmTime = time.Now()
+	// Get latest confirmed attestation address and re-import to wallet
+	paytoaddr, _, addrErr := s.attester.GetNextAttestationAddr((*btcutil.WIF)(nil), lastCommitmentHash)
+	if s.setFailure(addrErr) {
+		return // will rebound to init
+	}
+	log.Printf("********** importing latest confirmed addr: %s ...\n", paytoaddr.String())
+	importErr := s.attester.ImportAttestationAddr(paytoaddr)
+	if s.setFailure(importErr) {
+		return // will rebound to init
+	}
 
+	// get last unconfirmed commitment from server
+	lastCommitmentHash, latestErr = s.server.GetLatestAttestationCommitmentHash(false)
+	if s.setFailure(latestErr) {
+		return // will rebound to init
+	}
+
+	// Get latest unconfirmed attestation address and re-import to wallet
+	paytoaddr, _, addrErr = s.attester.GetNextAttestationAddr((*btcutil.WIF)(nil), lastCommitmentHash)
+	if s.setFailure(addrErr) {
+		return // will rebound to init
+	}
+	log.Printf("********** importing latest unconfirmed addr: %s ...\n", paytoaddr.String())
+	importErr = s.attester.ImportAttestationAddr(paytoaddr)
+	if s.setFailure(importErr) {
+		return // will rebound to init
+	}
+
+	s.state = AStateInit // update attestation state
 }
 
-// ASTATE_INIT
+// AStateInit
 // - Check if there are unconfirmed or unspent transactions in the client
 // - Update server with latest attestation information
 // - If no transaction found wait, else initiate new attestation
@@ -276,7 +296,7 @@ func (s *AttestService) doStateInit() {
 	}
 }
 
-// ASTATE_NEXT_COMMITMENT
+// AStateNextCommitment
 // - Get latest commitment from server
 // - Check if commitment has already been attested
 // - Send commitment to client signers
@@ -299,22 +319,19 @@ func (s *AttestService) doStateNextCommitment() {
 		return                            // will remain at the same state
 	}
 
-	// publish new commitment hash to clients
-	s.signer.SendNewHash((&latestCommitmentHash).CloneBytes())
-
 	// initialise new attestation with commitment
 	s.attestation = models.NewAttestationDefault()
 	s.attestation.SetCommitment(&latestCommitment)
 
-	s.state = ASTATE_NEW_ATTESTATION // update attestation state
+	s.state = AStateNewAttestation // update attestation state
 }
 
-// ASTATE_NEW_ATTESTATION
+// AStateNewAttestation
 // - Generate new pay to address for attestation transaction using client commitment
 // - Create new unsigned transaction using the last unspent
 // - If a topup unspent exists, add this to the new attestation
 // - Publish unsigned transaction to signer clients
-// - add ATIME_SIGS waiting time
+// - add ATimeSigs waiting time
 func (s *AttestService) doStateNewAttestation() {
 	log.Println("*AttestService* NEW ATTESTATION")
 
@@ -323,9 +340,12 @@ func (s *AttestService) doStateNewAttestation() {
 	if s.setFailure(keyErr) {
 		return // will rebound to init
 	}
-	paytoaddr, _ := s.attester.GetNextAttestationAddr(key, s.attestation.CommitmentHash())
+	paytoaddr, _, addrErr := s.attester.GetNextAttestationAddr(key, s.attestation.CommitmentHash())
+	if s.setFailure(addrErr) {
+		return // will rebound to init
+	}
 	log.Printf("********** importing pay-to addr: %s ...\n", paytoaddr.String())
-	importErr := s.attester.ImportAttestationAddr(paytoaddr)
+	importErr := s.attester.ImportAttestationAddr(paytoaddr, false) // no rescan needed here
 	if s.setFailure(importErr) {
 		return // will rebound to init
 	}
@@ -343,6 +363,7 @@ func (s *AttestService) doStateNewAttestation() {
 		if s.setFailure(topupUnspentErr) {
 			return // will rebound to init
 		} else if topupFound {
+			log.Printf("********** found topup unspent: %s\n", topupUnspent.TxID)
 			unspentList = append(unspentList, topupUnspent)
 		}
 
@@ -355,20 +376,35 @@ func (s *AttestService) doStateNewAttestation() {
 		s.attestation.Tx = *newTx
 		log.Printf("********** pre-sign txid: %s\n", s.attestation.Tx.TxHash().String())
 
-		// publish pre signed transaction
-		var txbytes bytes.Buffer
-		s.attestation.Tx.Serialize(&txbytes)
-		s.signer.SendNewTx(txbytes.Bytes())
+		// get last confirmed commitment from server
+		lastCommitmentHash, latestErr := s.server.GetLatestAttestationCommitmentHash()
+		if s.setFailure(latestErr) {
+			return // will rebound to init
+		}
 
-		s.state = ASTATE_SIGN_ATTESTATION // update attestation state
-		attestDelay = ATIME_SIGS          // add sigs waiting time
+		// publish pre signed transaction
+		txPreImages, getPreImagesErr := s.attester.getTransactionPreImages(lastCommitmentHash, newTx)
+		if s.setFailure(getPreImagesErr) {
+			return // will rebound to init
+		}
+		// get pre image bytes
+		var txPreImageBytes [][]byte
+		for _, txPreImage := range txPreImages {
+			var txBytesBuffer bytes.Buffer
+			txPreImage.Serialize(&txBytesBuffer)
+			txPreImageBytes = append(txPreImageBytes, txBytesBuffer.Bytes())
+		}
+		s.signer.SendTxPreImages(txPreImageBytes)
+
+		s.state = AStateSignAttestation // update attestation state
+		attestDelay = ATimeSigs         // add sigs waiting time
 	} else {
-		s.setFailure(errors.New(ERROR_UNSPENT_NOT_FOUND))
+		s.setFailure(errors.New(ErroUnspentNotFound))
 		return // will rebound to init
 	}
 }
 
-// ASTATE_SIGN_ATTESTATION
+// AStateSignAttestation
 // - Collect signatures from client signers
 // - Combine signatures them and sign the attestation transaction
 func (s *AttestService) doStateSignAttestation() {
@@ -390,15 +426,17 @@ func (s *AttestService) doStateSignAttestation() {
 	// sign attestation with combined sigs and last commitment
 	signedTx, signErr := s.attester.signAttestation(&s.attestation.Tx, sigs, lastCommitmentHash)
 	if s.setFailure(signErr) {
+		log.Printf("********** signer failure. resubscribing to signers...")
+		s.signer.ReSubscribe()
 		return // will rebound to init
 	}
 	s.attestation.Tx = *signedTx
 	s.attestation.Txid = s.attestation.Tx.TxHash()
 
-	s.state = ASTATE_PRE_SEND_STORE // update attestation state
+	s.state = AStatePreSendStore // update attestation state
 }
 
-// ASTATE_PRE_SEND_STORE
+// AStatePreSendStore
 // - Store unconfirmed attestation to server prior to sending
 func (s *AttestService) doStatePreSendStore() {
 	log.Println("*AttestService* PRE SEND STORE")
@@ -409,12 +447,12 @@ func (s *AttestService) doStatePreSendStore() {
 		return // will rebound to init
 	}
 
-	s.state = ASTATE_SEND_ATTESTATION // update attestation state
+	s.state = AStateSendAttestation // update attestation state
 }
 
-// ASTATE_SEND_ATTESTATION
+// AStateSendAttestation
 // - Send attestation transaction through the client to the network
-// - add ATIME_CONFIRMATION waiting time
+// - add ATimeConfirmation waiting time
 // - start time for confirmation time
 func (s *AttestService) doStateSendAttestation() {
 	log.Println("*AttestService* SEND ATTESTATION")
@@ -427,23 +465,23 @@ func (s *AttestService) doStateSendAttestation() {
 	s.attestation.Txid = txid
 	log.Printf("********** attestation transaction committed with txid: (%s)\n", txid)
 
-	s.state = ASTATE_AWAIT_CONFIRMATION // update attestation state
-	attestDelay = ATIME_CONFIRMATION    // add confirmation waiting time
-	confirmTime = time.Now()            // set time for awaiting confirmation
+	s.state = AStateAwaitConfirmation // update attestation state
+	attestDelay = ATimeConfirmation   // add confirmation waiting time
+	confirmTime = time.Now()          // set time for awaiting confirmation
 }
 
-// ASTATE_AWAIT_CONFIRMATION
+// AStateAwaitConfirmation
 // - Check if the attestation transaction has been confirmed in the main network
 // - If confirmed, initiate new attestation, update server and signer clients
 // - Check if ATIME_HANDLE_UNCONFIRMED has elapsed since attestation was sent
-// - add ATIME_NEW_ATTESTATION if confirmed or ATIME_CONFIRMATION if not to waiting time
+// - add ATIME_NEW_ATTESTATION if confirmed or ATimeConfirmation if not to waiting time
 func (s *AttestService) doStateAwaitConfirmation() {
 	log.Printf("*AttestService* AWAITING CONFIRMATION \ntxid: (%s)\ncommitment: (%s)\n", s.attestation.Txid.String(), s.attestation.CommitmentHash().String())
 
 	// if attestation has been unconfirmed for too long
 	// set to handle unconfirmed state
 	if time.Since(confirmTime) > atimeHandleUnconfirmed {
-		s.state = ASTATE_HANDLE_UNCONFIRMED
+		s.state = AStateHandleUnconfirmed
 		return
 	}
 
@@ -468,14 +506,14 @@ func (s *AttestService) doStateAwaitConfirmation() {
 		confirmedHash := s.attestation.CommitmentHash()
 		s.signer.SendConfirmedHash((&confirmedHash).CloneBytes()) // update clients
 
-		s.state = ASTATE_NEXT_COMMITMENT                            // update attestation state
+		s.state = AStateNextCommitment                              // update attestation state
 		attestDelay = atimeNewAttestation - time.Since(confirmTime) // add new attestation waiting time - subtract waiting time
 	} else {
-		attestDelay = ATIME_CONFIRMATION // add confirmation waiting time
+		attestDelay = ATimeConfirmation // add confirmation waiting time
 	}
 }
 
-// ASTATE_HANDLE_UNCONFIRMED
+// AStateHandleUnconfirmed
 // - Handle attestations that have been unconfirmed for too long
 // - Bump attestation fees and re-initiate sign and send process
 func (s *AttestService) doStateHandleUnconfirmed() {
@@ -491,13 +529,28 @@ func (s *AttestService) doStateHandleUnconfirmed() {
 	s.attestation.Tx = *currentTx
 	log.Printf("********** new pre-sign txid: %s\n", s.attestation.Tx.TxHash().String())
 
-	// re-publish pre signed transaction
-	var txbytes bytes.Buffer
-	s.attestation.Tx.Serialize(&txbytes)
-	s.signer.SendNewTx(txbytes.Bytes())
+	// get last confirmed commitment from server
+	lastCommitmentHash, latestErr := s.server.GetLatestAttestationCommitmentHash()
+	if s.setFailure(latestErr) {
+		return // will rebound to init
+	}
 
-	s.state = ASTATE_SIGN_ATTESTATION // update attestation state
-	attestDelay = ATIME_SIGS          // add sigs waiting time
+	// re-publish pre signed transaction
+	txPreImages, getPreImagesErr := s.attester.getTransactionPreImages(lastCommitmentHash, currentTx)
+	if s.setFailure(getPreImagesErr) {
+		return // will rebound to init
+	}
+	// get pre image bytes
+	var txPreImageBytes [][]byte
+	for _, txPreImage := range txPreImages {
+		var txBytesBuffer bytes.Buffer
+		txPreImage.Serialize(&txBytesBuffer)
+		txPreImageBytes = append(txPreImageBytes, txBytesBuffer.Bytes())
+	}
+	s.signer.SendTxPreImages(txPreImageBytes)
+
+	s.state = AStateSignAttestation // update attestation state
+	attestDelay = ATimeSigs         // add sigs waiting time
 }
 
 //Main attestation service method - cycles through AttestationStates
@@ -505,35 +558,35 @@ func (s *AttestService) doAttestation() {
 
 	// fixed waiting time between states specific states might
 	// re-write this to set specific waiting times
-	attestDelay = ATIME_FIXED
+	attestDelay = ATimeFixed
 
 	switch s.state {
 
-	case ASTATE_ERROR:
+	case AStateError:
 		s.doStateError()
 
-	case ASTATE_INIT:
+	case AStateInit:
 		s.doStateInit()
 
-	case ASTATE_NEXT_COMMITMENT:
+	case AStateNextCommitment:
 		s.doStateNextCommitment()
 
-	case ASTATE_NEW_ATTESTATION:
+	case AStateNewAttestation:
 		s.doStateNewAttestation()
 
-	case ASTATE_SIGN_ATTESTATION:
+	case AStateSignAttestation:
 		s.doStateSignAttestation()
 
-	case ASTATE_PRE_SEND_STORE:
+	case AStatePreSendStore:
 		s.doStatePreSendStore()
 
-	case ASTATE_SEND_ATTESTATION:
+	case AStateSendAttestation:
 		s.doStateSendAttestation()
 
-	case ASTATE_AWAIT_CONFIRMATION:
+	case AStateAwaitConfirmation:
 		s.doStateAwaitConfirmation()
 
-	case ASTATE_HANDLE_UNCONFIRMED:
+	case AStateHandleUnconfirmed:
 		s.doStateHandleUnconfirmed()
 	}
 }
@@ -542,7 +595,7 @@ func (s *AttestService) doAttestation() {
 func (s *AttestService) setFailure(err error) bool {
 	if err != nil {
 		s.errorState = err
-		s.state = ASTATE_ERROR
+		s.state = AStateError
 		return true
 	}
 	return false

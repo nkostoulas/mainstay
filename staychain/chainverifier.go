@@ -5,6 +5,7 @@
 package staychain
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -17,13 +18,14 @@ import (
 	"github.com/btcsuite/btcd/btcec"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcutil/hdkeychain"
 )
 
 // mainstay API url consts
 const (
-	API_ATTESTATION_URL      = "/api/v1/attestation"
-	API_COMMITMENT_URL       = "/api/v1/commitment"
-	API_COMMITMENT_PROOF_URL = "/api/v1/commitment/proof"
+	ApiAttestationUrl     = "/api/v1/attestation"
+	ApiCommitmentUrl      = "/api/v1/commitment"
+	ApiCommitmentProofUrl = "/api/v1/commitment/proof"
 )
 
 // Helper function to get response from mainstay api for url provided
@@ -85,18 +87,44 @@ type ChainVerifier struct {
 	apiHost      string
 	cfgMain      *chaincfg.Params
 	position     int
-	pubkeys      []*btcec.PublicKey
+	pubkeys      []*hdkeychain.ExtendedKey
 	numOfSigs    int
 	latestHeight int64
 }
 
 // Return new Chain Verifier instance that verifies attestations on the side chain
-func NewChainVerifier(cfgMain *chaincfg.Params, side clients.SidechainClient, position int, script string, host string) ChainVerifier {
+func NewChainVerifier(cfgMain *chaincfg.Params, side clients.SidechainClient, position int, script string, chaincodesStr []string, host string) ChainVerifier {
 
 	// parse base pubkeys from multisig redeemscript of attestation service
 	pubkeys, numOfSigs := crypto.ParseRedeemScript(script)
 
-	return ChainVerifier{side, host, cfgMain, position, pubkeys, numOfSigs, 0}
+	// get chaincodes of pubkeys from config
+	if len(chaincodesStr) != len(pubkeys) {
+		log.Fatal(fmt.Sprintf("Missing chaincodes for pubkeys %d != %d", len(chaincodesStr), len(pubkeys)))
+	}
+
+	// get chaincode bytes
+	chaincodes := make([][]byte, len(pubkeys))
+	for i_c := range chaincodesStr {
+		ccBytes, ccBytesErr := hex.DecodeString(chaincodesStr[i_c])
+		if ccBytesErr != nil || len(ccBytes) != 32 {
+			log.Fatal(fmt.Sprintf("Invalid chaincode provided %s", chaincodesStr[i_c]))
+		}
+		chaincodes[i_c] = append(chaincodes[i_c], ccBytes...)
+	}
+
+	// parse extended pubkeys
+	var pubkeysExtended []*hdkeychain.ExtendedKey
+	for i_p, pub := range pubkeys {
+		// Ignoring any fields except key and chaincode, as these are only used for
+		// child derivation and these two fields are the only required for this
+		// Since any child key will be derived from these, depth limits makes no sense
+		// Xpubs/xprivs are also never exported so full configuration is irrelevant
+		pubkeysExtended = append(pubkeysExtended,
+			hdkeychain.NewExtendedKey([]byte{}, pub.SerializeCompressed(), chaincodes[i_p], []byte{}, 0, 0, false))
+	}
+
+	return ChainVerifier{side, host, cfgMain, position, pubkeysExtended, numOfSigs, 0}
 }
 
 // Basic verification for vout size and number of addresses
@@ -126,7 +154,16 @@ func (v *ChainVerifier) verifyTxAddr(tx Tx, root string) error {
 
 	// tweak base pubkey with commitment from api
 	for _, pub := range v.pubkeys {
-		tweakedPub := crypto.TweakPubKey(pub, commitmentBytes)
+		// tweak extended pubkeys
+		// pseudo bip-32 child derivation to do pub key tweaking
+		tweakedKey, tweakErr := crypto.TweakExtendedKey(pub, commitmentBytes)
+		if tweakErr != nil {
+			return &ChainVerifierError{tweakErr.Error()}
+		}
+		tweakedPub, tweakPubErr := tweakedKey.ECPubKey()
+		if tweakPubErr != nil {
+			return &ChainVerifierError{tweakPubErr.Error()}
+		}
 		tweakedPubs = append(tweakedPubs, tweakedPub)
 	}
 	tweakedAddr, _ := crypto.CreateMultisig(tweakedPubs, v.numOfSigs, v.cfgMain)
@@ -144,8 +181,8 @@ func (v *ChainVerifier) verifyTxAddr(tx Tx, root string) error {
 // Proof this using an SPV merkle proof via an API call to mainstay service
 func (v *ChainVerifier) verifyCommitmentProof(commitment string, root string) error {
 	// get client commitment proof via api call
-	respProof, respProofErr := getApiResponse(fmt.Sprintf("%s%s?position=%d&commitment=%s",
-		v.apiHost, API_COMMITMENT_PROOF_URL, v.position, commitment))
+	respProof, respProofErr := getApiResponse(fmt.Sprintf("%s%s?position=%d&merkle_root=%s",
+		v.apiHost, ApiCommitmentProofUrl, v.position, root))
 	if respProofErr != nil {
 		return respProofErr
 	}
@@ -192,7 +229,7 @@ func (v *ChainVerifier) Verify(tx Tx) (ChainVerifierInfo, error) {
 
 	// get attestation root commitment via api call
 	respAttestation, respAttestationErr := getApiResponse(fmt.Sprintf("%s%s?txid=%s",
-		v.apiHost, API_ATTESTATION_URL, tx.Txid))
+		v.apiHost, ApiAttestationUrl, tx.Txid))
 	if respAttestationErr != nil {
 		return ChainVerifierInfo{}, respAttestationErr
 	}
@@ -206,7 +243,7 @@ func (v *ChainVerifier) Verify(tx Tx) (ChainVerifierInfo, error) {
 
 	// get client commitment via api call
 	respCommitment, respCommitmentErr := getApiResponse(fmt.Sprintf("%s%s?merkle_root=%s&position=%d",
-		v.apiHost, API_COMMITMENT_URL, root, v.position))
+		v.apiHost, ApiCommitmentUrl, root, v.position))
 	if respCommitmentErr != nil { // assume no client commitment for current attestation
 		return ChainVerifierInfo{}, nil
 	}

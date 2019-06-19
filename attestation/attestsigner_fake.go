@@ -5,13 +5,13 @@
 package attestation
 
 import (
-	"bytes"
+	"log"
 
 	confpkg "mainstay/config"
 	"mainstay/crypto"
 
+	"github.com/btcsuite/btcd/btcec"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
 )
 
 // AttestSignerFake struct
@@ -19,20 +19,28 @@ import (
 // Implements AttestSigner interface and provides
 // mock functionality for receiving sigs from signers
 type AttestSignerFake struct {
-	client *AttestClient
+	clients []*AttestClient
 }
 
 // store latest hash and transaction
-var signerTxBytes []byte
+var signerTxPreImageBytes []byte
 var signerConfirmedHashBytes []byte
-var signerNewHashBytes []byte
 
 // Return new AttestSignerFake instance
-func NewAttestSignerFake(config *confpkg.Config) AttestSignerFake {
+func NewAttestSignerFake(configs []*confpkg.Config) AttestSignerFake {
 
-	client := NewAttestClient(config, true) // isSigner flag set to allow signing transactions
+	var clients []*AttestClient
+	for _, config := range configs {
+		// isSigner flag set to allow signing transactions
+		clients = append(clients, NewAttestClient(config, true))
+	}
 
-	return AttestSignerFake{client: client}
+	return AttestSignerFake{clients: clients}
+}
+
+// Resubscribe - do nothing
+func (f AttestSignerFake) ReSubscribe() {
+	return
 }
 
 // Store received confirmed hash
@@ -40,38 +48,53 @@ func (f AttestSignerFake) SendConfirmedHash(hash []byte) {
 	signerConfirmedHashBytes = hash
 }
 
-// Store received new hash
-func (f AttestSignerFake) SendNewHash(hash []byte) {
-	signerNewHashBytes = hash
-}
-
 // Store received new tx
-func (f AttestSignerFake) SendNewTx(tx []byte) {
-	signerTxBytes = tx
+func (f AttestSignerFake) SendTxPreImages(txs [][]byte) {
+	signerTxPreImageBytes = SerializeBytes(txs)
 }
 
 // Return signatures for received tx and hashes
 func (f AttestSignerFake) GetSigs() [][]crypto.Sig {
-	var sigs [][]crypto.Sig
-
-	var msgTx wire.MsgTx
-	if err := msgTx.Deserialize(bytes.NewReader(signerTxBytes)); err != nil {
-		return sigs
-	}
+	// get confirmed hash from received confirmed hash bytes
 	hash, hashErr := chainhash.NewHash(signerConfirmedHashBytes)
 	if hashErr != nil {
-		return sigs
+		log.Printf("%v\n", hashErr)
+		return nil
 	}
-	signedMsgTx, _, signErr := f.client.SignTransaction(*hash, msgTx)
-	if signErr != nil {
-		return sigs
-	}
-	for _, txin := range signedMsgTx.TxIn {
-		scriptSig := txin.SignatureScript
-		if len(scriptSig) > 0 {
-			sig, _ := crypto.ParseScriptSig(scriptSig)
-			sigs = append(sigs, []crypto.Sig{sig[0]})
+
+	// get unserialized tx pre images
+	txPreImages := UnserializeBytes(signerTxPreImageBytes)
+
+	sigs := make([][]crypto.Sig, len(txPreImages)) // init sigs
+
+	// get sigs from each client
+	for _, client := range f.clients {
+		// process each pre image transaction and sign
+		for i_tx, txPreImage := range txPreImages {
+			// add hash type to tx serialization
+			txPreImage = append(txPreImage, []byte{1, 0, 0, 0}...)
+			txPreImageHash := chainhash.DoubleHashH(txPreImage)
+
+			// sign first tx with tweaked priv key and
+			// any remaining txs with topup key
+			var sig *btcec.Signature
+			var signErr error
+			if i_tx == 0 {
+				priv := client.GetKeyFromHash(*hash).PrivKey
+				sig, signErr = priv.Sign(txPreImageHash.CloneBytes())
+			} else {
+				sig, signErr = client.WalletPrivTopup.PrivKey.Sign(txPreImageHash.CloneBytes())
+			}
+			if signErr != nil {
+				log.Printf("%v\n", signErr)
+				return nil
+			}
+
+			// add hash type to signature as well
+			sigBytes := append(sig.Serialize(), []byte{byte(1)}...)
+			sigs[i_tx] = append(sigs[i_tx], sigBytes)
 		}
 	}
+
 	return sigs
 }

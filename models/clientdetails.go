@@ -5,7 +5,7 @@
 package models
 
 import (
-	_ "github.com/mongodb/mongo-go-driver/bson"
+	_ "go.mongodb.org/mongo-driver/bson"
 )
 
 // struct for db ClientDetails
@@ -13,11 +13,13 @@ type ClientDetails struct {
 	ClientPosition int32  `bson:"client_position"`
 	AuthToken      string `bson:"auth_token"`
 	Pubkey         string `bson:"pubkey"`
+	ClientName     string `bson:"client_name"`
 }
 
 // ClientDetails field names
 const (
-	CLIENT_DETAILS_CLIENT_POSITION_NAME = "client_position"
-	CLIENT_DETAILS_AUTH_TOKEN_NAME      = "auth_token"
-	CLIENT_DETAILS_PUBKEY_NAME          = "pubkey"
+	ClientDetailsClientPositionName = "client_position"
+	ClientDetailsAuthTokenName      = "auth_token"
+	ClientDetailsPubkeyName         = "pubkey"
+	ClientDetailsClientNameName     = "client_name"
 )

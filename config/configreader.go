@@ -17,14 +17,14 @@ import (
 // Client RPC connectivity and client related functionality
 
 const (
-	RPC_CLIENT_URL_NAME   = "rpcurl"
-	RPC_CLIENT_USER_NAME  = "rpcuser"
-	RPC_CLIENT_PASS_NAME  = "rpcpass"
-	RPC_CLIENT_CHAIN_NAME = "chain"
+	RpcClientUrlName   = "rpcurl"
+	RpcClientUserName  = "rpcuser"
+	RpcClientPassName  = "rpcpass"
+	RpcClientChainName = "chain"
 
-	ERROR_RPC_CONNECTION_FAILURE = "failed connecting to rpc client"
+	ErrorRpcConnectionFailure = "failed connecting to rpc client"
 
-	BAD_DATA_CLIENT_CHAIN = "invalid value for client chain. 'main', 'testnet' and 'regtest' allowed only"
+	ErrorBadDataClientChain = "invalid value for client chain. 'main', 'testnet' and 'regtest' allowed only"
 )
 
 // Get default conf from local file
@@ -45,9 +45,9 @@ func GetRPC(name string, conf []byte) (*rpcclient.Client, error) {
 	}
 
 	// get client url value
-	urlValue, urlValueErr := cfg.getValue(RPC_CLIENT_URL_NAME)
+	urlValue, urlValueErr := cfg.getValue(RpcClientUrlName)
 	if urlValueErr != nil {
-		return nil, errors.New(fmt.Sprintf("%s: %s", urlValueErr, RPC_CLIENT_URL_NAME))
+		return nil, errors.New(fmt.Sprintf("%s: %s", urlValueErr, RpcClientUrlName))
 	}
 	host := os.Getenv(urlValue)
 	if host == "" {
@@ -55,9 +55,9 @@ func GetRPC(name string, conf []byte) (*rpcclient.Client, error) {
 	}
 
 	// get client user value
-	userValue, userValueErr := cfg.getValue(RPC_CLIENT_USER_NAME)
+	userValue, userValueErr := cfg.getValue(RpcClientUserName)
 	if userValueErr != nil {
-		return nil, errors.New(fmt.Sprintf("%s: %s", userValueErr, RPC_CLIENT_USER_NAME))
+		return nil, errors.New(fmt.Sprintf("%s: %s", userValueErr, RpcClientUserName))
 	}
 	user := os.Getenv(userValue)
 	if user == "" {
@@ -65,9 +65,9 @@ func GetRPC(name string, conf []byte) (*rpcclient.Client, error) {
 	}
 
 	// get client password value
-	passValue, passValueErr := cfg.getValue(RPC_CLIENT_PASS_NAME)
+	passValue, passValueErr := cfg.getValue(RpcClientPassName)
 	if passValueErr != nil {
-		return nil, errors.New(fmt.Sprintf("%s: %s", passValueErr, RPC_CLIENT_PASS_NAME))
+		return nil, errors.New(fmt.Sprintf("%s: %s", passValueErr, RpcClientPassName))
 	}
 	pass := os.Getenv(passValue)
 	if pass == "" {
@@ -83,7 +83,7 @@ func GetRPC(name string, conf []byte) (*rpcclient.Client, error) {
 	}
 	client, rpcErr := rpcclient.New(connCfg, nil)
 	if rpcErr != nil {
-		return nil, errors.New(fmt.Sprintf("%s: %s", rpcErr, ERROR_RPC_CONNECTION_FAILURE))
+		return nil, errors.New(fmt.Sprintf("%s: %s", rpcErr, ErrorRpcConnectionFailure))
 	}
 	return client, nil
 }
@@ -95,18 +95,25 @@ func GetChainCfgParams(name string, conf []byte) (*chaincfg.Params, error) {
 		return nil, errors.New(fmt.Sprintf("%s: %s", cfgErr, name))
 	}
 
-	chain, valueErr := cfg.getValue(RPC_CLIENT_CHAIN_NAME)
-	if valueErr != nil {
-		return nil, errors.New(fmt.Sprintf("%s: %s", valueErr, RPC_CLIENT_CHAIN_NAME))
+	// error if RpcClientChainName not found in main config
+	chainValue, chainValueErr := cfg.getValue(RpcClientChainName)
+	if chainValueErr != nil {
+		return nil, errors.New(fmt.Sprintf("%s: %s", chainValueErr, RpcClientChainName))
 	}
+
+	// try get env or keep current value
+	chain := os.Getenv(chainValue)
+	if chain == "" {
+		chain = chainValue
+	}
+
 	if chain == "regtest" {
 		return &chaincfg.RegressionNetParams, nil
 	} else if chain == "testnet" {
 		return &chaincfg.TestNet3Params, nil
-	} else if chain == "main" {
-		return &chaincfg.MainNetParams, nil
 	}
-	return nil, nil
+	// mainnet returned unless specified otherwise
+	return &chaincfg.MainNetParams, nil
 }
 
 // Get parameter from conf file argument using base name and argument name

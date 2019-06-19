@@ -8,7 +8,7 @@ import (
 	"log"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/mongodb/mongo-go-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 // Build merkle proof for a specific position in the merkle tree
@@ -95,8 +95,8 @@ type CommitmentMerkleProofOpBSON struct {
 
 // Proof OP field names
 const (
-	PROOF_OP_APPEND_NAME     = "append"
-	PROOF_OP_COMMITMENT_NAME = "commitment"
+	ProofOpAppendName     = "append"
+	ProofOpCommitmentName = "commitment"
 )
 
 // CommitmentMerkleProof structure
@@ -131,10 +131,10 @@ func (c *CommitmentMerkleProof) UnmarshalBSON(b []byte) error {
 
 // Proof field names
 const (
-	PROOF_MERKLE_ROOT_NAME     = "merkle_root"
-	PROOF_CLIENT_POSITION_NAME = "client_position"
-	PROOF_COMMITMENT_NAME      = "commitment"
-	PROOF_OPS_NAME             = "ops"
+	ProofMerkleRootName     = "merkle_root"
+	ProofClientPositionName = "client_position"
+	ProofCommitmentName     = "commitment"
+	ProofOpsName            = "ops"
 )
 
 // CommitmentMerkleProofBSON structure for mongoDB

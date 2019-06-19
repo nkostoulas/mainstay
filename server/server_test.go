@@ -6,7 +6,6 @@ package server
 
 import (
 	"errors"
-	"fmt"
 	"testing"
 
 	"mainstay/models"
@@ -28,7 +27,7 @@ func TestServerUpdateLatestAttestation_NoClientCommitments(t *testing.T) {
 
 	// Test update latest attestation
 	errUpdate := server.UpdateLatestAttestation(*latest)
-	assert.Equal(t, errors.New(models.ERROR_COMMITMENT_NOT_DEFINED), errUpdate)
+	assert.Equal(t, errors.New(models.ErrorCommitmentNotDefined), errUpdate)
 }
 
 // Test Server UpdateLatestAttestation with 1 latest commitment
@@ -327,7 +326,7 @@ func TestServerGetClientCommitment(t *testing.T) {
 
 	// check empty latest commitment first
 	respClientCommitment, err := server.GetClientCommitment()
-	assert.Equal(t, errors.New(models.ERROR_COMMITMENT_LIST_EMPTY), err)
+	assert.Equal(t, errors.New(models.ErrorCommitmentListEmpty), err)
 
 	// set db latest commitment
 	hash0, _ := chainhash.NewHashFromStr("aaaaaaa1111d9a1e6cdc3418b54aa57747106bc75e9e84426661f27f98ada3b7")
@@ -340,33 +339,39 @@ func TestServerGetClientCommitment(t *testing.T) {
 	dbFake.SetClientCommitments(latestCommitments)
 
 	respClientCommitment, err = server.GetClientCommitment()
-	assert.Equal(t, errors.New(fmt.Sprintf("%s %d", ERROR_LATEST_COMMITMENT_MISSING, 1)), err)
-	assert.Equal(t, chainhash.Hash{}, respClientCommitment.GetCommitmentHash())
+	assert.Equal(t, nil, err)
+	latestCommitment, err2 := models.NewCommitment([]chainhash.Hash{*hash0, chainhash.Hash{}, *hash2})
+	assert.Equal(t, nil, err2)
+	assert.Equal(t, latestCommitment.GetCommitmentHash(), respClientCommitment.GetCommitmentHash())
 
 	// update server with incorrect latest commitment and test server
 	latestCommitments = []models.ClientCommitment{
-		models.ClientCommitment{*hash0, 1}, models.ClientCommitment{*hash2, 2}}
+		models.ClientCommitment{*hash1, 1}, models.ClientCommitment{*hash2, 2}}
 	dbFake.SetClientCommitments(latestCommitments)
 
 	respClientCommitment, err = server.GetClientCommitment()
-	assert.Equal(t, errors.New(fmt.Sprintf("%s %d", ERROR_LATEST_COMMITMENT_MISSING, 0)), err)
-	assert.Equal(t, chainhash.Hash{}, respClientCommitment.GetCommitmentHash())
+	assert.Equal(t, nil, err)
+	latestCommitment, err2 = models.NewCommitment([]chainhash.Hash{chainhash.Hash{}, *hash1, *hash2})
+	assert.Equal(t, nil, err2)
+	assert.Equal(t, latestCommitment.GetCommitmentHash(), respClientCommitment.GetCommitmentHash())
 
 	// update server with incorrect latest commitment and test server
 	latestCommitments = []models.ClientCommitment{models.ClientCommitment{*hash2, 2}}
 	dbFake.SetClientCommitments(latestCommitments)
 
 	respClientCommitment, err = server.GetClientCommitment()
-	assert.Equal(t, errors.New(fmt.Sprintf("%s %d", ERROR_LATEST_COMMITMENT_MISSING, 0)), err)
-	assert.Equal(t, chainhash.Hash{}, respClientCommitment.GetCommitmentHash())
+	assert.Equal(t, nil, err)
+	latestCommitment, err2 = models.NewCommitment([]chainhash.Hash{chainhash.Hash{}, chainhash.Hash{}, *hash2})
+	assert.Equal(t, nil, err2)
+	assert.Equal(t, latestCommitment.GetCommitmentHash(), respClientCommitment.GetCommitmentHash())
 
 	// update server with correct latest commitment and test server
 	latestCommitments = []models.ClientCommitment{
 		models.ClientCommitment{*hash0, 0},
 		models.ClientCommitment{*hash1, 1},
 		models.ClientCommitment{*hash2, 2}}
-	latestCommitment, err := models.NewCommitment([]chainhash.Hash{*hash0, *hash1, *hash2})
-	assert.Equal(t, nil, err)
+	latestCommitment, err2 = models.NewCommitment([]chainhash.Hash{*hash0, *hash1, *hash2})
+	assert.Equal(t, nil, err2)
 	dbFake.SetClientCommitments(latestCommitments)
 
 	respClientCommitment, err = server.GetClientCommitment()
@@ -395,7 +400,7 @@ func TestServerGetAttestationCommitment(t *testing.T) {
 	assert.Equal(t, chainhash.Hash{}, commitment.GetCommitmentHash())
 
 	commitment, err = server.GetAttestationCommitment(chainhash.Hash{}, false)
-	assert.Equal(t, errors.New(models.ERROR_COMMITMENT_LIST_EMPTY), err)
+	assert.Equal(t, errors.New(models.ErrorCommitmentListEmpty), err)
 
 	// update attestation to server
 	latestCommitments0 := []models.ClientCommitment{
@@ -475,5 +480,5 @@ func TestServerGetAttestationCommitment(t *testing.T) {
 	assert.Equal(t, chainhash.Hash{}, commitment.GetCommitmentHash())
 
 	commitment, err = server.GetAttestationCommitment(chainhash.Hash{}, false)
-	assert.Equal(t, errors.New(models.ERROR_COMMITMENT_LIST_EMPTY), err)
+	assert.Equal(t, errors.New(models.ErrorCommitmentListEmpty), err)
 }

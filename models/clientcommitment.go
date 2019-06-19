@@ -6,7 +6,7 @@ package models
 
 import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/mongodb/mongo-go-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 // struct for db ClientCommitment
@@ -39,8 +39,8 @@ func (c *ClientCommitment) UnmarshalBSON(b []byte) error {
 
 // Commitment field names
 const (
-	CLIENT_COMMITMENT_CLIENT_POSITION_NAME = "client_position"
-	CLIENT_COMMITMENT_COMMITMENT_NAME      = "commitment"
+	ClientCommitmentClientPositionName = "client_position"
+	ClientCommitmentCommitmentName     = "commitment"
 )
 
 // ClientCommitmentBSON structure for mongoDB
